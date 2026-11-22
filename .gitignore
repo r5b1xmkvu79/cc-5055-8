@@ -23,3 +23,7 @@ __pycache__/
 *.log
 .env
 .env.*
+
+# Project-local generated artifacts and throwaway diagnostics
+output/
+scratch/
