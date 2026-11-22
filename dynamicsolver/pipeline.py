@@ -14,8 +14,10 @@ import cv2
 import numpy as np
 
 from .camerasolve import solve_cameras
-from .decomposition import BACKGROUND, BOX, decompose, layer_track_data
+from .decomposition import BACKGROUND, BOX, DEFERRED, decompose, layer_track_data
 from .features import extract_tracks
+from .layer_drift import DriftReport, diagnose_drift
+from .layer_tracker import LayerTrackerResult, track_layers
 from .objectpose import render_overlay, solve_box
 from .priors import Priors
 from .synth import SCENARIOS, SceneConfig, generate
@@ -27,6 +29,8 @@ class PipelineResult:
     frames: list = field(default_factory=list)
     tracks: list = field(default_factory=list)
     decomposition: object = None
+    layer_tracking: LayerTrackerResult | None = None
+    drift_report: DriftReport | None = None
     camera_solve: object = None
     box_solve: object = None
     composite: list = field(default_factory=list)
@@ -48,6 +52,29 @@ def read_clip(video_path: str):
         frames.append(frame)
     cap.release()
     return frames
+
+
+def _apply_tracking(dec, tracking) -> None:
+    """Commit reversible tracker decisions onto the decomposition label map.
+
+    The decomposition's own label objects are mutated in place so every
+    downstream stage (camera solve, box solve, composite, evaluation) reads one
+    consistent layer partition. The original layer is preserved on every
+    correction's ``inverse`` and recoverable via ``tracking.rollback()``.
+    """
+    for tid, layer in tracking.assignments.items():
+        lab = dec.labels.get(tid)
+        if lab is None or lab.layer == layer:
+            continue
+        lab.layer = layer
+        if layer == DEFERRED:
+            lab.confidence = min(lab.confidence, 0.5)
+    dec.bg_tracks = sorted(tid for tid, lab in dec.labels.items()
+                           if lab.layer == BACKGROUND)
+    dec.box_tracks = sorted(tid for tid, lab in dec.labels.items()
+                            if lab.layer == BOX)
+    dec.deferred_tracks = sorted(tid for tid, lab in dec.labels.items()
+                                 if lab.layer == DEFERRED)
 
 
 def run_pipeline(scenario: str | None = None,
@@ -95,6 +122,16 @@ def run_pipeline(scenario: str | None = None,
         dec = decompose(tracks, res.K, w, h, priors=priors, seed=seed,
                         anchor_span=anchor_span)
         res.decomposition = dec
+
+        # Multi-hypothesis identity reconnection across same-speed windows.
+        # Only decided corrections change a layer; observationally unresolved
+        # tracks stay deferred with both hypotheses retained, and the full
+        # correction log is reversible (LayerTrackerResult.rollback).
+        tracking = track_layers(tracks, dec, strategy="offline")
+        res.layer_tracking = tracking
+        if tracking.corrections:
+            _apply_tracking(dec, tracking)
+        res.drift_report = diagnose_drift(tracks, dec, tracking, w, h)
 
         bg_data = layer_track_data(tracks, dec, BACKGROUND)
         cam = solve_cameras(bg_data, res.K, len(frames),

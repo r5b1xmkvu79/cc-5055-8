@@ -118,10 +118,16 @@ few static tracks survive):
 | `synth.py`         | Deterministic scene/clip rendering and ground-truth bundle for the four scenarios. |
 | `features.py`      | KLT track extraction and frame correspondences.           |
 | `decomposition.py` | Multi-baseline layered decomposition, crossing detection, deferral, verdicts. |
+| `layer_tracker.py` | Multi-hypothesis identity chains across same-speed windows; flow-field replay, reversible `IdentityCorrection` log, offline/online benchmark. |
+| `layer_drift.py`   | Observation-only drift evidence chain; same-speed vs occlusion cause classification, stage-localised residuals, bounded logging. |
 | `camerasolve.py`   | Background incremental SfM and pose-only bundle adjustment. |
 | `objectpose.py`    | ArUco/grain box PnP, track-to-body binding, overlay rendering. |
-| `evaluation.py`    | Ground-truth layer F1, identity swaps, pose and reprojection metrics. |
-| `pipeline.py`      | Stage orchestration and compositing shared by GUI and CLI. |
+| `evaluation.py`    | Ground-truth layer F1, identity swaps (tracker-aware), pose and reprojection metrics. |
+| `pipeline.py`      | Stage orchestration, tracker commit and compositing shared by GUI and CLI. |
 | `priors.py`        | Declared assumptions.                                     |
-| `gui/`             | PySide6 shot-tracking window and QThread worker.          |
+| `gui/`             | PySide6 shot-tracking window, drift panel and QThread worker. |
 | `cli.py`           | Headless batch/CI helper mirroring the GUI controls.      |
+
+See `docs/layer_identity_drift.md` for the same-speed/occlusion evidence chain,
+the reversible correction semantics and the measured offline-vs-online
+strategy choice.

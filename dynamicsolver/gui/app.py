@@ -21,7 +21,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
-    QSplitter, QVBoxLayout, QWidget,
+    QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..decomposition import BACKGROUND, BOX, DEFERRED
@@ -103,6 +103,13 @@ class MainWindow(QMainWindow):
         self.verdict_label = QLabel("内核状态 Kernel: 未运行 idle")
         self.verdict_label.setWordWrap(True)
         lv.addWidget(self.verdict_label)
+
+        lv.addWidget(QLabel("层身份漂移诊断 Layer-identity drift"))
+        self.drift_view = QTextEdit()
+        self.drift_view.setReadOnly(True)
+        self.drift_view.setPlaceholderText(
+            "运行分解后显示同速运动/交叉遮挡证据链。")
+        lv.addWidget(self.drift_view, 1)
 
         lv.addWidget(QLabel("运动层 Motion layers"))
         self.layer_list = QListWidget()
@@ -186,8 +193,21 @@ class MainWindow(QMainWindow):
         self.frame_slider.setRange(0, max(n - 1, 0))
         self.frame_info.setText(f"/ {n - 1}")
         self.frame_index = 0
+        self._populate_drift()
         self._populate_inspector()
         self._render_frame()
+
+    def _populate_drift(self):
+        """Bounded observation-only evidence chain for the drift panel."""
+        report = self.result.drift_report if self.result else None
+        if report is None:
+            self.drift_view.clear()
+            return
+        lines = [f"总计 Totals: {report.totals}"]
+        lines.extend(report.log_lines())
+        if report.bounded:
+            lines.append("（逐轨迹明细已按事件上限截断）")
+        self.drift_view.setPlainText("\n".join(lines))
 
     def _on_failed(self, message):
         self.run_btn.setEnabled(True)
@@ -264,12 +284,38 @@ class MainWindow(QMainWindow):
             cv_circle(region, uv, color, radius)
         if highlight_tid is not None:
             self._draw_track_path(region, highlight_tid)
+        self._draw_drift_overlay(region, f)
         self.region_view.setPixmap(_bgr_to_qpix(region).scaled(
             self.region_view.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         comp = self._composite_for_frame(f)
         self.composite_view.setPixmap(_bgr_to_qpix(comp).scaled(
             self.composite_view.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def _draw_drift_overlay(self, img, frame_index):
+        """Annotate same-speed/occlusion windows from the actual drift report.
+
+        The text is derived from the measured evidence chain (not a default
+        label), so the region-motion panel and the decomposition diagnostics
+        always present one consistent, computed reason.
+        """
+        import cv2
+        report = self.result.drift_report
+        if report is None:
+            return
+        active = [ev for ev in report.events
+                  if ev.window[0] <= frame_index <= ev.window[1]]
+        if not active:
+            return
+        lines = []
+        for ev in active:
+            lines.append(f"{ev.window} {ev.cause} ({ev.confidence})")
+        cv2.rectangle(img, (0, 0), (img.shape[1], 26 * len(lines) + 8),
+                      (0, 0, 0), -1)
+        for i, text in enumerate(lines):
+            cv2.putText(img, text, (10, 22 + 26 * i),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                        cv2.LINE_AA)
 
     def _draw_track_path(self, img, tid):
         tr = next((t for t in self.result.tracks if t.track_id == tid), None)

@@ -20,6 +20,7 @@ from .synth import SCENARIOS
 
 def _summarize(result, gt_bundle=None, gt_obs=None, K=None):
     dec, cam, box = result.decomposition, result.camera_solve, result.box_solve
+    lt, drift = result.layer_tracking, result.drift_report
     summary = {
         "ok": result.ok,
         "stage_errors": result.stage_errors,
@@ -31,6 +32,18 @@ def _summarize(result, gt_bundle=None, gt_obs=None, K=None):
         "internal_label_flips": dec.internal_label_flips if dec else 0,
         "verdict": dec.reason if dec else "no decomposition",
         "warnings": dec.warnings if dec else [],
+        "layer_tracking": None if lt is None else {
+            "strategy": lt.strategy,
+            "corrections": len(lt.corrections),
+            "decided": sum(1 for c in lt.corrections if c.decided),
+            "unresolved": len(lt.unresolved),
+            "tracker_faults": lt.tracker_faults,
+            "elapsed_s": lt.elapsed_s,
+        },
+        "drift_diagnostics": None if drift is None else {
+            "totals": drift.totals,
+            "log": drift.log_lines(),
+        },
         "camera": {"ok": cam.ok, "reason": cam.reason,
                    "reproj_px": None if not np.isfinite(cam.mean_reproj_px) else cam.mean_reproj_px,
                    "n_tracks": cam.n_tracks} if cam else None,
@@ -39,7 +52,8 @@ def _summarize(result, gt_bundle=None, gt_obs=None, K=None):
                  "n_assigned": box.n_assigned} if box else None),
     }
     if gt_bundle and gt_obs and cam and cam.ok:
-        report = evaluate(result.tracks, dec, cam, box, K, gt_bundle, gt_obs)
+        report = evaluate(result.tracks, dec, cam, box, K, gt_bundle, gt_obs,
+                          tracker_result=lt)
         summary["evaluation"] = {
             "layer_f1": report.layer_f1,
             "identity_swaps": report.identity_swaps,

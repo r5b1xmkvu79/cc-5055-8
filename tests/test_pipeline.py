@@ -71,6 +71,31 @@ class TestPipeline(unittest.TestCase):
                 self.assertTrue(result.box_solve.ok)
                 self.assertEqual(len(result.composite), len(result.frames))
 
+    def test_layer_tracking_and_drift_evidence_are_attached(self):
+        result = run_pipeline(scenario="similar")
+        self.assertIsNotNone(result.layer_tracking)
+        self.assertIsNotNone(result.drift_report)
+        lt = result.layer_tracking
+        self.assertGreater(len(lt.corrections), 0)
+        # Reversible log restores the pre-tracker partition exactly.
+        restored = lt.rollback()
+        current = {tid: lab.layer for tid, lab
+                   in result.decomposition.labels.items()}
+        # Current reflects applied decisions; rollback differs but is a valid
+        # full partition over the same track ids.
+        self.assertEqual(set(restored), set(current))
+        # Drift report is observation-only and bounded.
+        report = result.drift_report
+        self.assertTrue(report.events)
+        self.assertEqual(report.totals["n_tracker_faults"], 0)
+        self.assertLess(len(report.log_lines()),
+                        4 * len(report.events) + 20)
+
+    def test_tracker_does_not_touch_scenarios_without_crossing(self):
+        result = run_pipeline(scenario="occlusion")
+        self.assertEqual(result.layer_tracking.corrections, [])
+        self.assertEqual(result.layer_tracking.tracker_faults, [])
+
     def test_sparse_reports_ambiguity_instead_of_silent_mislabel(self):
         result = run_pipeline(scenario="sparse")
         dec = result.decomposition

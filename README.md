@@ -31,10 +31,25 @@ The shot-tracking window provides, in one place:
 * **Motion-layer selector** — checkable background / box / deferred layers.
 * **Observation inspector** — click a track to see its id, layer, confidence,
   frame span, and full trajectory, and exactly which observations support it.
+* **Layer-identity drift panel** — the bounded, observation-only evidence
+  chain for every same-speed/occlusion window: cause (same-speed motion vs
+  crossing occlusion), per-stage layer attribution and geometry residuals,
+  reversible tracker corrections and honest unresolved ties.
 * **Result area** — a region-motion decomposition view next to the
-  virtual-model composite, with play / frame transport.
+  virtual-model composite, with play / frame transport. While the transport is
+  inside a drift window the region view overlays the measured cause, so the
+  region motion and the composite are always compared against one computed
+  reason rather than a default label.
 * **Reliability verdict** — the kernel's honest `ok / ambiguous separation /
   failure` verdict, never a forced label.
+
+The motion-layer tracker (`dynamicsolver/layer_tracker.py`) replays two swap
+hypotheses from the frame before each same-speed window, keeps each
+candidate's support and replayable trajectory, and commits only when the
+layer flow-field margin is decisive; otherwise the track stays deferred with
+both hypotheses retained. Every correction is reversible. The offline-vs-online
+strategy choice and its measurements are documented in
+[`docs/layer_identity_drift.md`](docs/layer_identity_drift.md).
 
 ## Headless helper (CLI)
 
@@ -44,8 +59,10 @@ python -m dynamicsolver.cli --scenario {baseline,sparse,similar,occlusion} \
 ```
 
 The CLI writes `summary.json` (layer F1, identity-swap count, camera/box pose
-errors, reprojection RMSE, verdict) and a composite video. It exists for batch
-runs and CI; every option mirrors a GUI control.
+errors, reprojection RMSE, verdict) and a composite video. The summary also
+contains the `layer_tracking` correction counters and the bounded
+`drift_diagnostics` evidence log. It exists for batch runs and CI; every
+option mirrors a GUI control.
 
 ## Synthetic ground-truth scenarios
 
@@ -85,5 +102,8 @@ PYTHONPATH=/workspace python -m unittest discover -s tests
 
 The suite covers geometry/projection/triangulation, ArUco reliability and
 symmetry breaking, the cardinality-trap verdict, same-speed crossing
-detection, end-to-end completion for all four scenarios, and relative
-box-camera pose accuracy.
+detection, end-to-end completion for all four scenarios, relative box-camera
+pose accuracy, the multi-hypothesis layer tracker (replayable hypotheses,
+ground-truth-correct decisions, honest deferrals, exact rollback, offline vs
+online parity) and the observation-only drift diagnostics (same-speed vs
+occlusion causes, stage-localised evidence, bounded log cost).

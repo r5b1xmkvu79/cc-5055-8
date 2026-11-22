@@ -162,17 +162,28 @@ def layer_confusion(result, mapping, gt_layer_map):
     return confusion, f1
 
 
-def identity_swaps(result, mapping, gt_layer_map, crossing_windows):
+def identity_swaps(result, mapping, gt_layer_map, crossing_windows,
+                   tracker_result=None):
     """Count true identity exchanges across a same-speed crossing window.
 
     A swap is a *track whose assigned structure changes from one hard layer to
-    the other between the windows immediately before and after a crossing*.
-    Deferred windows are not swaps: holding identity through an ambiguous
-    crossing is the correct behaviour, not an exchange. Vote ambiguity alone
-    (a single hard label with competing soft evidence) does not count.
+    the other between the windows immediately before and after a crossing* and
+    whose final hard label is therefore wrong. Deferred windows are not swaps:
+    holding identity through an ambiguous crossing is correct behaviour, not an
+    exchange. When a motion-layer tracker result is supplied, its reversible
+    correction log is honoured: a flip the tracker explicitly reconnected (or
+    kept deferred as an unresolved tie) is not an exchange either, because the
+    swap never reaches the output partition.
     """
     if not crossing_windows:
         return 0, []
+    reconnected, held_open = set(), set()
+    if tracker_result is not None:
+        for corr in tracker_result.corrections:
+            if corr.decided:
+                reconnected.add(corr.track_id)
+            else:
+                held_open.add(corr.track_id)
     swaps, details = 0, []
     windows = sorted({(win.f0, win.f1) for win in result.pair_evidence},
                      key=lambda z: z[0])
@@ -182,10 +193,13 @@ def identity_swaps(result, mapping, gt_layer_map, crossing_windows):
         if pre_win is None or post_win is None:
             continue
         for tid, lab in result.labels.items():
-            # A track the kernel ultimately deferred across the crossing is an
-            # identity hold, not an exchange, even though its historical window
-            # labels record competing hard evidence.
-            if lab.layer == DEFERRED:
+            # A track the kernel ultimately deferred, or the tracker kept open
+            # as an unresolved tie, is an identity hold rather than an exchange.
+            if lab.layer == DEFERRED or tid in held_open:
+                continue
+            # A flip the multi-hypothesis tracker reconnected never reaches the
+            # output layer partition as an exchange.
+            if tid in reconnected:
                 continue
             gt_name = gt_layer_map.get(tid)
             if gt_name is None:
@@ -315,7 +329,8 @@ def _robust_rmse(errs):
     return float(np.sqrt(np.mean(inl ** 2)))
 
 
-def evaluate(tracks, result, cam_solve, box_solve, K, gt_bundle_path, obs_npz_path):
+def evaluate(tracks, result, cam_solve, box_solve, K, gt_bundle_path, obs_npz_path,
+             tracker_result=None):
     gt_frames = load_observations(obs_npz_path)
     mapping = match_tracks_to_gt(tracks, gt_frames)
     id_layer_map, landmark = gt_layers(gt_bundle_path)
@@ -326,8 +341,10 @@ def evaluate(tracks, result, cam_solve, box_solve, K, gt_bundle_path, obs_npz_pa
         if gid in id_layer_map:
             gt_layer_map[tid] = id_layer_map[gid]
     confusion, f1 = layer_confusion(result, mapping=None, gt_layer_map=gt_layer_map)
-    swaps, swap_details = identity_swaps(result, mapping=None, gt_layer_map=gt_layer_map,
-                                         crossing_windows=result.crossing_windows)
+    swaps, swap_details = identity_swaps(
+        result, mapping=None, gt_layer_map=gt_layer_map,
+        crossing_windows=result.crossing_windows,
+        tracker_result=tracker_result)
     gt = np.load(gt_bundle_path)
     cam_r, cam_td, cam_pos = (np.inf, np.inf, np.inf)
     box_r, box_p = (np.inf, np.inf)
